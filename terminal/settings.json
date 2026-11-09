@@ -1,0 +1,127 @@
+{
+    "$help": "https://aka.ms/terminal-documentation",
+    "$schema": "https://aka.ms/terminal-profiles-schema",
+    "actions": [],
+    "alwaysOnTop": false,
+    "copyFormatting": "none",
+    "launchMode": "focus",
+    "copyOnSelect": false,
+    "defaultProfile": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}",
+    "keybindings": 
+    [
+        {
+            "id": "Terminal.CopyToClipboard",
+            "keys": "ctrl+c"
+        },
+        {
+            "id": "Terminal.PasteFromClipboard",
+            "keys": "ctrl+v"
+        },
+        {
+            "id": "Terminal.DuplicatePaneAuto",
+            "keys": "alt+shift+d"
+        }
+    ],
+    "newTabMenu": 
+    [
+        {
+            "type": "remainingProfiles"
+        }
+    ],
+    "profiles": 
+    {
+        "defaults":
+        {
+            "padding": "14, 10, 14, 10",
+            "cursorShape": "bar",
+            "intenseTextStyle": "bright",
+            "scrollbarState": "hidden"
+        },
+        "list": 
+        [
+            {
+                "backgroundImage": null,
+                "backgroundImageOpacity": 0.32,
+                "colorScheme": "Ros\u00e9 Pine",
+                "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo",
+                "cursorColor": "#E0DEF4",
+                "cursorShape": "bar",
+                "font":
+                {
+                    "face": "JetBrainsMono Nerd Font Mono",
+                    "size": 11,
+                    "cellHeight": "1.25"
+                },
+                "guid": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}",
+                "hidden": false,
+                "name": "Windows PowerShell",
+                "opacity": 78,
+                "useAcrylic": true
+            },
+            {
+                "commandline": "%SystemRoot%\\System32\\cmd.exe",
+                "guid": "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}",
+                "hidden": false,
+                "name": "Prompt de comando"
+            },
+            {
+                "guid": "{b453ae62-4e3d-5e58-b989-0a998ec441b8}",
+                "hidden": false,
+                "name": "Azure Cloud Shell",
+                "source": "Windows.Terminal.Azure"
+            }
+        ]
+    },
+    "schemes": 
+    [
+        {
+            "background": "#191724",
+            "black": "#26233A",
+            "blue": "#9CCFD8",
+            "brightBlack": "#6E6A86",
+            "brightBlue": "#9CCFD8",
+            "brightCyan": "#EBBCBA",
+            "brightGreen": "#31748F",
+            "brightPurple": "#C4A7E7",
+            "brightRed": "#EB6F92",
+            "brightWhite": "#E0DEF4",
+            "brightYellow": "#F6C177",
+            "cursorColor": "#E0DEF4",
+            "cyan": "#EBBCBA",
+            "foreground": "#E0DEF4",
+            "green": "#31748F",
+            "name": "Ros\u00e9 Pine",
+            "purple": "#C4A7E7",
+            "red": "#EB6F92",
+            "selectionBackground": "#403D52",
+            "white": "#E0DEF4",
+            "yellow": "#F6C177"
+        }
+    ],
+    "theme": "rose-pine",
+    "themes":
+    [
+        {
+            "name": "rose-pine",
+            "tab":
+            {
+                "background": "#191724FF",
+                "unfocusedBackground": "#19172400",
+                "showCloseButton": "hover"
+            },
+            "tabRow":
+            {
+                "background": "#191724FF",
+                "unfocusedBackground": "#191724FF"
+            },
+            "window":
+            {
+                "applicationTheme": "dark",
+                "useMica": false
+            }
+        }
+    ],
+    "showTabsInTitlebar": true,
+    "alwaysShowTabs": false,
+    "useAcrylicInTabRow": false
+}
