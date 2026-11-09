@@ -13,12 +13,16 @@ Inclui também o rice do terminal: prompt em duas linhas, fetch no estilo fastfe
 - Foco segue o mouse; o cursor vai até a janela focada pelo teclado.
 - Config com a sintaxe do Hyprland (`bind`, `bindm`, `workspace`, `windowrulev2`) e recarga ao salvar.
 - Indicador de workspaces na tela e ícone na bandeja com o workspace atual.
+- **Launcher** (`Win+R`): busca fuzzy nos apps do menu Iniciar (desktop e Store), com ícones e ranking por uso.
+  Texto sem correspondência vira comando, como na caixa Executar; prefixo `>` força comando.
+  Navegue com setas, `Tab` ou `Ctrl+J/K`; `Enter` abre, `Esc` fecha.
 
 ## Atalhos padrão
 
 | Atalho | Ação |
 |---|---|
 | `Win+Q` / `Win+Enter` | Terminal (`wt.exe`) |
+| `Win+R` | Launcher estilo rofi (apps do menu Iniciar + comandos) |
 | `Win+C` | Fecha a janela ativa |
 | `Win+1..9`, `Win+0` | Workspace 1–10 |
 | `Win+Shift+1..0` | Move a janela para o workspace |

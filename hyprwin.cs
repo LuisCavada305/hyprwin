@@ -5,7 +5,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -103,7 +106,16 @@ namespace HyprWin
         [DllImport("advapi32.dll")] public static extern bool OpenProcessToken(IntPtr p, uint a, out IntPtr t);
         [DllImport("advapi32.dll")] public static extern bool GetTokenInformation(IntPtr t, int c, out int v, int len, out int ret);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+        [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr h);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+        public static extern void SHCreateItemFromParsingName(string path, IntPtr pbc, [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
+            [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory ppv);
     }
+
+    [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int cx, cy; }
+
+    [ComImport, Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellItemImageFactory { [PreserveSig] int GetImage(SIZE size, int flags, out IntPtr phbm); }
 
     public class Win
     {
@@ -179,6 +191,230 @@ namespace HyprWin
         }
     }
 
+    public class AppEntry { public string Name, Id; public Bitmap Icon; public bool IconTried, IsCommand; public int Score; }
+
+    // Launcher no estilo rofi (drun + run): busca nos apps do menu Iniciar ou executa o texto como comando.
+    public class Launcher : Form
+    {
+        public Func<List<AppEntry>> Source;
+        public Func<string, int, Bitmap> IconLoader;
+        public Action<AppEntry, string> OnLaunch;
+        public Dictionary<string, int> Uses = new Dictionary<string, int>();
+
+        const int Rows = 8;
+        static readonly Color Bg = Color.FromArgb(25, 23, 36), Overlay = Color.FromArgb(38, 35, 58),
+            TextC = Color.FromArgb(224, 222, 244), Muted = Color.FromArgb(110, 106, 134),
+            Iris = Color.FromArgb(196, 167, 231), Foam = Color.FromArgb(156, 207, 216);
+
+        readonly TextBox box = new TextBox();
+        readonly List<AppEntry> results = new List<AppEntry>();
+        int sel, top;
+        float s = 1f;
+        Font font, glyphFont;
+        string glyphSearch, glyphRun;
+
+        int RowH { get { return (int)(38 * s); } }
+        int HeadH { get { return (int)(56 * s); } }
+        int Pad { get { return (int)(10 * s); } }
+        int IconSize { get { return (int)(22 * s); } }
+
+        public Launcher()
+        {
+            FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
+            StartPosition = FormStartPosition.Manual; DoubleBuffered = true; BackColor = Bg; Text = "HyprWinLauncher";
+            box.BorderStyle = BorderStyle.None; box.BackColor = Bg; box.ForeColor = TextC;
+            Controls.Add(box);
+            box.TextChanged += delegate { Filter(); };
+            Deactivate += delegate { Hide(); };
+            MouseMove += delegate(object o, MouseEventArgs e) { int i = RowAt(e.Y); if (i >= 0 && i != sel) { sel = i; Invalidate(); } };
+            MouseDown += delegate(object o, MouseEventArgs e) { int i = RowAt(e.Y); if (e.Button == MouseButtons.Left && i >= 0) Launch(i); };
+            MouseWheel += delegate(object o, MouseEventArgs e) { MoveSel(e.Delta > 0 ? -1 : 1); };
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            uint round = 2, border = 0x00E7A7C4;   // cantos arredondados + borda iris (COLORREF)
+            N.DwmSetWindowAttribute(Handle, 33, ref round, 4);
+            N.DwmSetWindowAttribute(Handle, 34, ref border, 4);
+        }
+
+        static string PickFont(string[] names, string fallback)
+        {
+            foreach (FontFamily f in FontFamily.Families)
+                foreach (string n in names) if (f.Name == n) return n;
+            return fallback;
+        }
+
+        public void Open(RECT work, float scale)
+        {
+            s = scale;
+            string nf = PickFont(new string[] { "JetBrainsMono NFM", "JetBrainsMono Nerd Font Mono", "JetBrainsMono Nerd Font" }, null);
+            if (font != null) { font.Dispose(); glyphFont.Dispose(); }
+            font = new Font(nf ?? "Segoe UI", 12.5f * s, FontStyle.Regular, GraphicsUnit.Pixel);
+            if (nf != null) { glyphFont = new Font(nf, 15 * s, GraphicsUnit.Pixel); glyphSearch = ""; glyphRun = ""; }
+            else { glyphFont = new Font("Segoe MDL2 Assets", 14 * s, GraphicsUnit.Pixel); glyphSearch = ""; glyphRun = ""; }
+
+            int w = (int)(620 * s), h = HeadH + Rows * RowH + Pad * 2;
+            Bounds = new Rectangle(work.CX - w / 2, work.T + work.H / 5, w, h);
+            box.Font = font;
+            box.Location = new Point((int)(48 * s), (HeadH - box.PreferredHeight) / 2 + 1);
+            box.Width = w - (int)(48 * s) - Pad * 2;
+            box.Text = "";
+            Filter();
+            Show();
+            box.Focus();
+        }
+
+        int RowAt(int y)
+        {
+            int i = (y - HeadH - Pad) / Math.Max(1, RowH);
+            if (y < HeadH + Pad || i >= Rows) return -1;
+            i += top;
+            return i < results.Count ? i : -1;
+        }
+
+        // Pontua o nome contra a busca: prefixo > início de palavra > substring > subsequência. -1 = sem match.
+        static int Score(string name, string q)
+        {
+            if (q.Length == 0) return 0;
+            string n = name.ToLowerInvariant();
+            q = q.ToLowerInvariant();
+            int idx = n.IndexOf(q, StringComparison.Ordinal);
+            if (idx == 0) return 1000 - n.Length;
+            if (idx > 0) return (IsWordStart(n, idx) ? 800 : 600) - idx;
+            int qi = 0, score = 300, prev = -2;
+            for (int i = 0; i < n.Length && qi < q.Length; i++)
+            {
+                if (n[i] != q[qi]) continue;
+                score += 10;
+                if (IsWordStart(n, i)) score += 15;
+                if (prev == i - 1) score += 5;
+                prev = i; qi++;
+            }
+            return qi == q.Length ? score - n.Length / 4 : -1;
+        }
+
+        static bool IsWordStart(string n, int i) { return i == 0 || " -_.(".IndexOf(n[i - 1]) >= 0; }
+
+        void Filter()
+        {
+            string q = box.Text.Trim();
+            results.Clear();
+            if (q.StartsWith(">"))
+            {
+                string cmd = q.Substring(1).Trim();
+                if (cmd.Length > 0) results.Add(new AppEntry { Name = cmd, IsCommand = true });
+            }
+            else
+            {
+                foreach (AppEntry e in Source())
+                {
+                    int sc = Score(e.Name, q);
+                    if (sc < 0) continue;
+                    int u;
+                    Uses.TryGetValue(e.Id, out u);
+                    e.Score = sc + Math.Min(u, 20) * (q.Length == 0 ? 1000 : 15);
+                    results.Add(e);
+                }
+                results.Sort(delegate(AppEntry a, AppEntry b)
+                {
+                    int c = b.Score.CompareTo(a.Score);
+                    return c != 0 ? c : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                });
+                if (q.Length > 0) results.Add(new AppEntry { Name = q, IsCommand = true });
+            }
+            sel = 0; top = 0;
+            Invalidate();
+        }
+
+        void MoveSel(int d)
+        {
+            if (results.Count == 0) return;
+            sel = Math.Max(0, Math.Min(results.Count - 1, sel + d));
+            if (sel < top) top = sel;
+            if (sel >= top + Rows) top = sel - Rows + 1;
+            Invalidate();
+        }
+
+        void Launch(int i)
+        {
+            if (i < 0 || i >= results.Count) return;
+            AppEntry e = results[i];
+            Hide();
+            OnLaunch(e, box.Text.Trim());
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys k)
+        {
+            switch (k)
+            {
+                case Keys.Down: case Keys.Tab: case Keys.Control | Keys.J: case Keys.Control | Keys.N: MoveSel(1); return true;
+                case Keys.Up: case Keys.Shift | Keys.Tab: case Keys.Control | Keys.K: case Keys.Control | Keys.P: MoveSel(-1); return true;
+                case Keys.PageDown: MoveSel(Rows); return true;
+                case Keys.PageUp: MoveSel(-Rows); return true;
+                case Keys.Enter: Launch(sel); return true;
+                case Keys.Escape: Hide(); return true;
+            }
+            return base.ProcessCmdKey(ref msg, k);
+        }
+
+        static GraphicsPath RoundRect(Rectangle r, int rad)
+        {
+            GraphicsPath p = new GraphicsPath();
+            int d = rad * 2;
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+
+        protected override void OnPaint(PaintEventArgs pe)
+        {
+            if (font == null) return;
+            Graphics g = pe.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            TextFormatFlags left = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
+
+            TextRenderer.DrawText(g, glyphSearch, glyphFont, new Rectangle((int)(16 * s), 0, (int)(28 * s), HeadH), Iris, left);
+            using (SolidBrush sep = new SolidBrush(Overlay)) g.FillRectangle(sep, Pad, HeadH - 1, Width - Pad * 2, 1);
+
+            if (results.Count == 0)
+            {
+                TextRenderer.DrawText(g, "Nenhum resultado", font, new Rectangle(Pad * 2, HeadH + Pad, Width, RowH), Muted, left);
+                return;
+            }
+            for (int i = 0; i < Rows; i++)
+            {
+                int idx = top + i;
+                if (idx >= results.Count) break;
+                AppEntry e = results[idx];
+                Rectangle r = new Rectangle(Pad, HeadH + Pad + i * RowH, Width - Pad * 2, RowH);
+                if (idx == sel)
+                    using (GraphicsPath p = RoundRect(r, (int)(7 * s)))
+                    using (SolidBrush b = new SolidBrush(Overlay)) g.FillPath(b, p);
+
+                int ix = r.X + (int)(12 * s), iy = r.Y + (RowH - IconSize) / 2;
+                int tx = ix + IconSize + (int)(14 * s);
+                Color nameColor = idx == sel ? Iris : TextC;
+                if (e.IsCommand)
+                {
+                    TextRenderer.DrawText(g, glyphRun, glyphFont, new Rectangle(ix, r.Y, IconSize + 4, RowH), Foam, left);
+                    Size pre = TextRenderer.MeasureText(g, "Executar ", font, Size.Empty, left);
+                    TextRenderer.DrawText(g, "Executar ", font, new Rectangle(tx, r.Y, pre.Width, RowH), Muted, left);
+                    TextRenderer.DrawText(g, e.Name, font, new Rectangle(tx + pre.Width, r.Y, r.Right - tx - pre.Width - Pad, RowH), nameColor, left | TextFormatFlags.EndEllipsis);
+                    continue;
+                }
+                if (!e.IconTried) { e.IconTried = true; try { e.Icon = IconLoader(e.Id, IconSize); } catch { } }
+                if (e.Icon != null) g.DrawImage(e.Icon, ix, iy, IconSize, IconSize);
+                TextRenderer.DrawText(g, e.Name, font, new Rectangle(tx, r.Y, r.Right - tx - Pad, RowH), nameColor, left | TextFormatFlags.EndEllipsis);
+            }
+        }
+    }
+
     public static class App
     {
         public const int WM_APP = 0x8000;
@@ -217,6 +453,14 @@ namespace HyprWin
         static bool animOn = true; static int animMs = 220; static double animPopin = 0.85, animSlide = 0.12;
         static readonly Dictionary<IntPtr, Anim> anims = new Dictionary<IntPtr, Anim>();
         static System.Windows.Forms.Timer animTimer;
+
+        // launcher
+        static Launcher launcher;
+        static List<AppEntry> apps = new List<AppEntry>();
+        static DateTime appsAt = DateTime.MinValue;
+        static readonly Dictionary<string, int> uses = new Dictionary<string, int>();
+        static string HistPath;
+        static System.Windows.Forms.Timer indexTimer;
         static volatile Bind[] binds = new Bind[0];
         static List<Rule> rules = new List<Rule>();
         static Dictionary<int, string> wsRule = new Dictionary<int, string>();       // workspace fixado -> monitor
@@ -282,6 +526,11 @@ namespace HyprWin
             reloadTimer.Tick += delegate { reloadTimer.Stop(); Guard(Reload); };
             animTimer = new System.Windows.Forms.Timer { Interval = 10 };
             animTimer.Tick += delegate { Guard(AnimTick); };
+            HistPath = Path.Combine(dir, "launcher.history");
+            LoadHistory();
+            indexTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+            indexTimer.Tick += delegate { indexTimer.Stop(); indexTimer.Interval = 500; Guard(IndexApps); };
+            indexTimer.Start();
 
             try
             {
@@ -698,7 +947,172 @@ namespace HyprWin
                 case "movetoworkspacesilent": MoveToWs(ResolveWs(arg), false); break;
                 case "exit": Quit(); break;
                 case "reload": Reload(); break;
+                case "launcher": ToggleLauncher(); break;
                 default: Log("ação desconhecida: " + action); break;
+            }
+        }
+
+        // ---------------------------------------------------------------- launcher
+
+        static void LoadHistory()
+        {
+            if (!File.Exists(HistPath)) return;
+            foreach (string line in File.ReadAllLines(HistPath))
+            {
+                int tab = line.IndexOf('\t'), n;
+                if (tab > 0 && int.TryParse(line.Substring(0, tab), out n)) uses[line.Substring(tab + 1)] = n;
+            }
+        }
+
+        static void SaveHistory()
+        {
+            try
+            {
+                List<string> l = new List<string>();
+                foreach (KeyValuePair<string, int> kv in uses) l.Add(kv.Value + "\t" + kv.Key);
+                File.WriteAllLines(HistPath, l.ToArray());
+            }
+            catch (Exception e) { Log("history: " + e.Message); }
+        }
+
+        static readonly Regex NotAnApp = new Regex(@"uninstall|desinstal|readme|release notes|\bhelp\b|ajuda|documenta", RegexOptions.IgnoreCase);
+        static readonly HashSet<string> DocExt = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".chm", ".html", ".htm", ".txt", ".pdf", ".url", ".md" };
+
+        // Lista os apps do menu Iniciar (desktop e Store) via shell:AppsFolder.
+        static void IndexApps()
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            Dictionary<string, AppEntry> old = new Dictionary<string, AppEntry>();
+            foreach (AppEntry e in apps) old[e.Id] = e;
+            List<AppEntry> l = new List<AppEntry>();
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Type t = Type.GetTypeFromProgID("Shell.Application");
+            object sh = Activator.CreateInstance(t);
+            object folder = t.InvokeMember("NameSpace", BindingFlags.InvokeMethod, null, sh, new object[] { "shell:AppsFolder" });
+            object items = folder.GetType().InvokeMember("Items", BindingFlags.InvokeMethod, null, folder, null);
+            foreach (object it in (System.Collections.IEnumerable)items)
+            {
+                string name = it.GetType().InvokeMember("Name", BindingFlags.GetProperty, null, it, null) as string;
+                string id = it.GetType().InvokeMember("Path", BindingFlags.GetProperty, null, it, null) as string;
+                Marshal.ReleaseComObject(it);
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(id) || NotAnApp.IsMatch(name)) continue;
+                string ext = "";
+                try { ext = Path.GetExtension(id); } catch { }
+                if (DocExt.Contains(ext) || !seen.Add(name)) continue;
+                AppEntry prev;
+                l.Add(old.TryGetValue(id, out prev) ? prev : new AppEntry { Name = name, Id = id });
+            }
+            Marshal.ReleaseComObject(items); Marshal.ReleaseComObject(folder); Marshal.ReleaseComObject(sh);
+            apps = l;
+            appsAt = DateTime.Now;
+            Log("launcher: " + l.Count + " apps indexados em " + sw.ElapsedMilliseconds + " ms");
+        }
+
+        static bool IsFilePath(string id) { return id.Length > 2 && (id[1] == ':' || id.StartsWith("\\\\")); }
+
+        static Bitmap LoadAppIcon(string id, int size)
+        {
+            IShellItemImageFactory f;
+            N.SHCreateItemFromParsingName(IsFilePath(id) ? id : "shell:AppsFolder\\" + id, IntPtr.Zero, typeof(IShellItemImageFactory).GUID, out f);
+            try
+            {
+                SIZE sz = new SIZE(); sz.cx = Math.Max(32, size); sz.cy = sz.cx;
+                IntPtr hbm;
+                if (f.GetImage(sz, 0x4, out hbm) != 0 || hbm == IntPtr.Zero) return null;
+                try { return ToArgb(hbm); } finally { N.DeleteObject(hbm); }
+            }
+            finally { Marshal.ReleaseComObject(f); }
+        }
+
+        // Image.FromHbitmap descarta o alfa; copia os pixels como PArgb para manter a transparência.
+        static Bitmap ToArgb(IntPtr hbm)
+        {
+            using (Bitmap src = Image.FromHbitmap(hbm))
+            {
+                if (Image.GetPixelFormatSize(src.PixelFormat) < 32) return new Bitmap(src);
+                BitmapData d = src.LockBits(new Rectangle(0, 0, src.Width, src.Height), ImageLockMode.ReadOnly, src.PixelFormat);
+                try
+                {
+                    using (Bitmap view = new Bitmap(d.Width, d.Height, d.Stride, PixelFormat.Format32bppPArgb, d.Scan0))
+                        return new Bitmap(view);
+                }
+                finally { src.UnlockBits(d); }
+            }
+        }
+
+        static void ToggleLauncher()
+        {
+            if (launcher == null)
+            {
+                launcher = new Launcher();
+                launcher.Source = delegate { return apps; };
+                launcher.IconLoader = LoadAppIcon;
+                launcher.Uses = uses;
+                launcher.OnLaunch = LaunchEntry;
+                launcher.VisibleChanged += delegate { if (!launcher.Visible) LauncherClosed(); };
+            }
+            if (launcher.Visible) { launcher.Hide(); return; }
+            if (apps.Count == 0) IndexApps();
+            // O foco que segue o mouse fecharia o launcher ao mover o cursor; desliga enquanto ele está aberto.
+            if (followMouse) N.SystemParametersInfo(0x1001, 0, IntPtr.Zero, 2);
+            float sc;
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) sc = g.DpiX / 96f;
+            Mon m = MonByName(Monitors(), FocusMon());
+            launcher.Open(m != null ? m.Work : new RECT(0, 0, 1280, 720), sc);
+            ForceForeground(launcher.Handle);
+        }
+
+        static void LauncherClosed()
+        {
+            if (followMouse) N.SystemParametersInfo(0x1001, 0, (IntPtr)1, 2);
+            if ((DateTime.Now - appsAt).TotalMinutes > 10) indexTimer.Start();
+        }
+
+        static void ForceForeground(IntPtr h)
+        {
+            IntPtr fg = N.GetForegroundWindow();
+            uint pid;
+            uint fgT = N.GetWindowThreadProcessId(fg, out pid), me = N.GetCurrentThreadId();
+            bool att = fgT != 0 && fgT != me && N.AttachThreadInput(me, fgT, true);
+            N.SetForegroundWindow(h);
+            N.BringWindowToTop(h);
+            if (att) N.AttachThreadInput(me, fgT, false);
+        }
+
+        static void LaunchEntry(AppEntry e, string query)
+        {
+            string key = e.IsCommand ? ">" + e.Name : e.Id;
+            int n;
+            uses.TryGetValue(key, out n);
+            if (!e.IsCommand) { uses[key] = n + 1; SaveHistory(); }
+            try
+            {
+                if (e.IsCommand) RunCommand(e.Name);
+                else if (IsFilePath(e.Id)) Process.Start(new ProcessStartInfo(e.Id) { UseShellExecute = true });
+                else Process.Start("explorer.exe", "shell:AppsFolder\\" + e.Id);
+            }
+            catch (Exception ex) { Log("launcher '" + e.Name + "': " + ex.Message); }
+        }
+
+        // Igual à caixa Executar: tenta ShellExecute; se falhar (ex.: .cmd no PATH), usa "cmd /c start".
+        static void RunCommand(string cmd)
+        {
+            string file = cmd, args = "";
+            if (cmd.StartsWith("\"")) { int q = cmd.IndexOf('"', 1); if (q > 0) { file = cmd.Substring(1, q - 1); args = cmd.Substring(q + 1).Trim(); } }
+            else { int sp = cmd.IndexOf(' '); if (sp > 0) { file = cmd.Substring(0, sp); args = cmd.Substring(sp + 1).Trim(); } }
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo(file, args);
+                psi.UseShellExecute = true;
+                psi.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                Process.Start(psi);
+            }
+            catch
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c start \"\" " + cmd);
+                psi.UseShellExecute = false; psi.CreateNoWindow = true;
+                psi.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                Process.Start(psi);
             }
         }
 
