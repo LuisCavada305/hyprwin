@@ -18,7 +18,7 @@ Inclui também o rice do terminal: prompt em duas linhas, fetch no estilo fastfe
 
 | Atalho | Ação |
 |---|---|
-| `Win+D` / `Win+Enter` | Terminal (`wt.exe`) |
+| `Win+Q` / `Win+Enter` | Terminal (`wt.exe`) |
 | `Win+C` | Fecha a janela ativa |
 | `Win+1..9`, `Win+0` | Workspace 1–10 |
 | `Win+Shift+1..0` | Move a janela para o workspace |
