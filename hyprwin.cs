@@ -198,7 +198,7 @@ namespace HyprWin
     {
         public Func<List<AppEntry>> Source;
         public Func<string, int, Bitmap> IconLoader;
-        public Action<AppEntry, string> OnLaunch;
+        public Action<AppEntry, bool> OnLaunch;   // (entrada, como administrador)
         public Dictionary<string, int> Uses = new Dictionary<string, int>();
 
         const int Rows = 8;
@@ -227,7 +227,7 @@ namespace HyprWin
             box.TextChanged += delegate { Filter(); };
             Deactivate += delegate { Hide(); };
             MouseMove += delegate(object o, MouseEventArgs e) { int i = RowAt(e.Y); if (i >= 0 && i != sel) { sel = i; Invalidate(); } };
-            MouseDown += delegate(object o, MouseEventArgs e) { int i = RowAt(e.Y); if (e.Button == MouseButtons.Left && i >= 0) Launch(i); };
+            MouseDown += delegate(object o, MouseEventArgs e) { int i = RowAt(e.Y); if (e.Button == MouseButtons.Left && i >= 0) Launch(i, false); };
             MouseWheel += delegate(object o, MouseEventArgs e) { MoveSel(e.Delta > 0 ? -1 : 1); };
         }
 
@@ -337,12 +337,12 @@ namespace HyprWin
             Invalidate();
         }
 
-        void Launch(int i)
+        void Launch(int i, bool admin)
         {
             if (i < 0 || i >= results.Count) return;
             AppEntry e = results[i];
             Hide();
-            OnLaunch(e, box.Text.Trim());
+            OnLaunch(e, admin);
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys k)
@@ -353,7 +353,8 @@ namespace HyprWin
                 case Keys.Up: case Keys.Shift | Keys.Tab: case Keys.Control | Keys.K: case Keys.Control | Keys.P: MoveSel(-1); return true;
                 case Keys.PageDown: MoveSel(Rows); return true;
                 case Keys.PageUp: MoveSel(-Rows); return true;
-                case Keys.Enter: Launch(sel); return true;
+                case Keys.Enter: Launch(sel, false); return true;
+                case Keys.Control | Keys.Shift | Keys.Enter: Launch(sel, true); return true;
                 case Keys.Escape: Hide(); return true;
             }
             return base.ProcessCmdKey(ref msg, k);
@@ -1079,24 +1080,33 @@ namespace HyprWin
             if (att) N.AttachThreadInput(me, fgT, false);
         }
 
-        static void LaunchEntry(AppEntry e, string query)
+        static void LaunchEntry(AppEntry e, bool admin)
         {
-            string key = e.IsCommand ? ">" + e.Name : e.Id;
-            int n;
-            uses.TryGetValue(key, out n);
-            if (!e.IsCommand) { uses[key] = n + 1; SaveHistory(); }
+            if (!e.IsCommand)
+            {
+                int n;
+                uses.TryGetValue(e.Id, out n);
+                uses[e.Id] = n + 1;
+                SaveHistory();
+            }
             try
             {
-                if (e.IsCommand) RunCommand(e.Name);
-                else if (IsFilePath(e.Id)) Process.Start(new ProcessStartInfo(e.Id) { UseShellExecute = true });
-                else Process.Start("explorer.exe", "shell:AppsFolder\\" + e.Id);
+                if (e.IsCommand) RunCommand(e.Name, admin);
+                else if (IsFilePath(e.Id)) Process.Start(new ProcessStartInfo(e.Id) { UseShellExecute = true, Verb = admin ? "runas" : "" });
+                else Process.Start("explorer.exe", "shell:AppsFolder\\" + e.Id);   // apps da Store não elevam por aqui
             }
-            catch (Exception ex) { Log("launcher '" + e.Name + "': " + ex.Message); }
+            catch (Exception ex)
+            {
+                System.ComponentModel.Win32Exception w = ex as System.ComponentModel.Win32Exception;
+                if (w == null || w.NativeErrorCode != 1223) Log("launcher '" + e.Name + "': " + ex.Message);   // 1223 = UAC cancelado
+            }
         }
 
-        // Igual à caixa Executar: tenta ShellExecute; se falhar (ex.: .cmd no PATH), usa "cmd /c start".
-        static void RunCommand(string cmd)
+        // Igual à caixa Executar: expande %VARIAVEIS%, tenta ShellExecute e, se falhar
+        // (ex.: .cmd no PATH), usa "cmd /c start". admin = Ctrl+Shift+Enter (pede UAC).
+        static void RunCommand(string cmd, bool admin)
         {
+            cmd = Environment.ExpandEnvironmentVariables(cmd);
             string file = cmd, args = "";
             if (cmd.StartsWith("\"")) { int q = cmd.IndexOf('"', 1); if (q > 0) { file = cmd.Substring(1, q - 1); args = cmd.Substring(q + 1).Trim(); } }
             else { int sp = cmd.IndexOf(' '); if (sp > 0) { file = cmd.Substring(0, sp); args = cmd.Substring(sp + 1).Trim(); } }
@@ -1104,11 +1114,13 @@ namespace HyprWin
             {
                 ProcessStartInfo psi = new ProcessStartInfo(file, args);
                 psi.UseShellExecute = true;
+                if (admin) psi.Verb = "runas";
                 psi.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                 Process.Start(psi);
             }
             catch
             {
+                if (admin) throw;
                 ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c start \"\" " + cmd);
                 psi.UseShellExecute = false; psi.CreateNoWindow = true;
                 psi.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
