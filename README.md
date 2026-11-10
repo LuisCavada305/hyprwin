@@ -55,6 +55,7 @@ Outros comandos:
 ```
 
 Edite `hyprwin.conf` e salve para recarregar.
+`dwindle:min_tile = 480x240` define o menor tile; sem espaço para dividir, as janelas novas empilham no último tile (no mesmo monitor).
 `sendshortcut, MODS, TECLA[, campo:regex]` envia um atalho para a janela ativa (com filtro opcional por `class`, `title` ou `exe`). Os nomes dos monitores (`DISPLAY1`, `DISPLAY2`…) aparecem em `hyprwin.log`.
 
 ### Rice do terminal (opcional)

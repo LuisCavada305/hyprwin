@@ -1,4 +1,4 @@
-﻿// HyprWin: tiling estilo Hyprland usando apenas Win32 + .NET Framework (sem instalar nada).
+// HyprWin: tiling estilo Hyprland usando apenas Win32 + .NET Framework (sem instalar nada).
 // Compilado em tempo de execução por hyprwin.ps1 (C# 5, Windows PowerShell 5.1).
 // Cada monitor mostra um workspace ativo; workspaces podem ser fixados a um monitor no hyprwin.conf.
 using System;
@@ -448,7 +448,7 @@ namespace HyprWin
         static readonly Dictionary<uint, bool> elevCache = new Dictionary<uint, bool>();
 
         // config
-        static int gapsIn = 5, gapsOut = 10, wsCount = 10, followDelay = 150;
+        static int gapsIn = 5, gapsOut = 10, wsCount = 10, followDelay = 150, minTileW = 480, minTileH = 240;
         static uint colActive = 0xFFCC33, colInactive = 0x595959;
         static bool activeOn = true, inactiveOn = true, followMouse = true, autoHide = false, showOsd = true;
         static bool animOn = true; static int animMs = 220; static double animPopin = 0.85, animSlide = 0.12;
@@ -597,6 +597,12 @@ namespace HyprWin
                     {
                         case "gaps_in": gapsIn = int.Parse(val); break;
                         case "gaps_out": gapsOut = int.Parse(val); break;
+                        case "min_tile":
+                            {
+                                string[] p = val.ToLowerInvariant().Split('x');
+                                minTileW = int.Parse(p[0].Trim()); minTileH = int.Parse(p[1].Trim());
+                                break;
+                            }
                         case "col.active_border": colActive = ParseColor(val, out activeOn); break;
                         case "col.inactive_border": colInactive = ParseColor(val, out inactiveOn); break;
                         case "follow_mouse": followMouse = val != "0" && val.ToLower() != "false"; break;
@@ -1500,6 +1506,16 @@ namespace HyprWin
                     if (i == t.Count - 1) { Place(w, area, false); break; }
                     bool vert = area.W >= area.H;
                     if (w.Flip) vert = !vert;
+                    if (!CanSplit(area, vert, w.Ratio))
+                    {
+                        // Sem espaço para dividir: as janelas restantes empilham na área atual e ficam no monitor.
+                        if (CanSplit(area, !vert, w.Ratio)) vert = !vert;
+                        else
+                        {
+                            for (int j = i; j < t.Count; j++) { t[j].Node = area; Place(t[j], area, false); }
+                            break;
+                        }
+                    }
                     w.SplitVert = vert;
                     RECT a, b;
                     if (vert)
@@ -1518,6 +1534,13 @@ namespace HyprWin
                     area = b;
                 }
             }
+        }
+
+        static bool CanSplit(RECT a, bool vert, double ratio)
+        {
+            int len = vert ? a.W : a.H, min = vert ? minTileW : minTileH;
+            int first = (int)(len * ratio) - gapsIn;
+            return first >= min && len - first - 2 * gapsIn >= min;
         }
 
         static void Place(Win w, RECT r, bool raise)
@@ -1595,21 +1618,42 @@ namespace HyprWin
         }
 
         // Reaplica o layout se um app mudou o próprio tamanho (no máximo 3 tentativas por alvo).
+        // Depois disso, só mantém a janela dentro do monitor (o app recusa ficar menor que o tamanho mínimo dele).
         static void Enforce()
         {
             if (dragWin != null || nativeDrag != null) return;
             foreach (Win w in wins)
             {
-                if (!IsActive(w.Ws) || w.Floating || !w.HasTarget || w.Retries >= 3 || N.IsIconic(w.H) || anims.ContainsKey(w.H)) continue;
+                if (!IsActive(w.Ws) || w.Floating || !w.HasTarget || N.IsIconic(w.H) || anims.ContainsKey(w.H)) continue;
                 RECT r;
                 if (!ExtRect(w.H, out r)) continue;
                 if (Math.Abs(r.L - w.Target.L) > 2 || Math.Abs(r.T - w.Target.T) > 2 || Math.Abs(r.R - w.Target.R) > 2 || Math.Abs(r.B - w.Target.B) > 2)
                 {
                     if (IsAppFullscreen(w.H)) continue;
-                    w.Retries++;
-                    Place(w, w.Target, false);
+                    if (w.Retries < 3) { w.Retries++; Place(w, w.Target, false); }
+                    else KeepOnMonitor(w, r);
                 }
             }
+        }
+
+        static void KeepOnMonitor(Win w, RECT r)
+        {
+            RECT m = new RECT();
+            bool found = false;
+            foreach (Mon mon in Monitors())
+            {
+                int ws;
+                if (active.TryGetValue(mon.Name, out ws) && ws == w.Ws) { m = mon.Work; found = true; break; }
+            }
+            if (!found) return;
+            int dx = 0, dy = 0;
+            if (r.R > m.R) dx = m.R - r.R;
+            if (r.L + dx < m.L) dx = m.L - r.L;
+            if (r.B > m.B) dy = m.B - r.B;
+            if (r.T + dy < m.T) dy = m.T - r.T;
+            if (dx == 0 && dy == 0) return;
+            RECT wr; N.GetWindowRect(w.H, out wr);
+            N.SetWindowPos(w.H, IntPtr.Zero, wr.L + dx, wr.T + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNC);
         }
 
         static void ApplyBorders()
