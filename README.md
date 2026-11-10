@@ -34,7 +34,7 @@ Inclui também o rice do terminal: prompt em duas linhas, fetch no estilo fastfe
 | `Win+J` | Toggle split |
 | `Win+E` | Explorer |
 | `Win+W` | Edge |
-| `Win+T` | Mostra/esconde a barra de abas do Windows Terminal (`sendshortcut` → `Ctrl+Shift+F12`) |
+| `Win+T` | Mostra/esconde a barra de abas do Windows Terminal (`sendshortcut` → `Ctrl+Shift+F12`; exige o atalho no Terminal, veja abaixo) |
 | `Win+M` | Sai do HyprWin (mostra todas as janelas) |
 | `Win+scroll` | Workspace seguinte / anterior no monitor |
 | `Win+arrastar` | Esquerdo move, direito redimensiona |
@@ -56,7 +56,15 @@ Outros comandos:
 
 Edite `hyprwin.conf` e salve para recarregar.
 `dwindle:min_tile = 480x240` define o menor tile; sem espaço para dividir, as janelas novas empilham no último tile (no mesmo monitor).
-`sendshortcut, MODS, TECLA[, campo:regex]` envia um atalho para a janela ativa (com filtro opcional por `class`, `title` ou `exe`). Os nomes dos monitores (`DISPLAY1`, `DISPLAY2`…) aparecem em `hyprwin.log`.
+`sendshortcut, MODS, TECLA[, campo:regex]` envia um atalho para a janela ativa (com filtro opcional por `class`, `title` ou `exe`).
+O app alvo precisa ter esse atalho configurado: o HyprWin só envia as teclas e não sabe se o app reage.
+O `Win+T` padrão exige `Ctrl+Shift+F12` no Windows Terminal, que não vem de fábrica. Adicione em `keybindings` no `settings.json` do Terminal:
+
+```json
+{ "id": "Terminal.ToggleFocusMode", "keys": "ctrl+shift+f12" }
+```
+
+Os nomes dos monitores (`DISPLAY1`, `DISPLAY2`…) aparecem em `hyprwin.log`.
 
 ### Rice do terminal (opcional)
 
