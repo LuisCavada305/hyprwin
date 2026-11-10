@@ -1,10 +1,16 @@
 {
     "$help": "https://aka.ms/terminal-documentation",
     "$schema": "https://aka.ms/terminal-profiles-schema",
-    "actions": [],
+    "actions":
+    [
+        {
+            "command": "toggleFocusMode",
+            "id": "User.ToggleFocusMode"
+        }
+    ],
     "alwaysOnTop": false,
+    "alwaysShowTabs": false,
     "copyFormatting": "none",
-    "launchMode": "focus",
     "copyOnSelect": false,
     "defaultProfile": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}",
     "keybindings": 
@@ -20,8 +26,13 @@
         {
             "id": "Terminal.DuplicatePaneAuto",
             "keys": "alt+shift+d"
+        },
+        {
+            "id": "User.ToggleFocusMode",
+            "keys": "ctrl+shift+f12"
         }
     ],
+    "launchMode": "focus",
     "newTabMenu": 
     [
         {
@@ -30,11 +41,11 @@
     ],
     "profiles": 
     {
-        "defaults":
+        "defaults": 
         {
-            "padding": "14, 10, 14, 10",
             "cursorShape": "bar",
             "intenseTextStyle": "bright",
+            "padding": "14, 10, 14, 10",
             "scrollbarState": "hidden"
         },
         "list": 
@@ -46,11 +57,11 @@
                 "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo",
                 "cursorColor": "#E0DEF4",
                 "cursorShape": "bar",
-                "font":
+                "font": 
                 {
+                    "cellHeight": "1.25",
                     "face": "JetBrainsMono Nerd Font Mono",
-                    "size": 11,
-                    "cellHeight": "1.25"
+                    "size": 11
                 },
                 "guid": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}",
                 "hidden": false,
@@ -98,30 +109,33 @@
             "yellow": "#F6C177"
         }
     ],
+    "showTabsInTitlebar": true,
     "theme": "rose-pine",
-    "themes":
+    "themes": 
     [
         {
             "name": "rose-pine",
-            "tab":
+            "tab": 
             {
                 "background": "#191724FF",
-                "unfocusedBackground": "#19172400",
-                "showCloseButton": "hover"
+                "iconStyle": "default",
+                "showCloseButton": "hover",
+                "unfocusedBackground": "#19172400"
             },
-            "tabRow":
+            "tabRow": 
             {
                 "background": "#191724FF",
                 "unfocusedBackground": "#191724FF"
             },
-            "window":
+            "window": 
             {
                 "applicationTheme": "dark",
+                "experimental.rainbowFrame": false,
+                "frame": null,
+                "unfocusedFrame": null,
                 "useMica": false
             }
         }
     ],
-    "showTabsInTitlebar": true,
-    "alwaysShowTabs": false,
     "useAcrylicInTabRow": false
 }

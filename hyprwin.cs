@@ -949,8 +949,58 @@ namespace HyprWin
                 case "exit": Quit(); break;
                 case "reload": Reload(); break;
                 case "launcher": ToggleLauncher(); break;
+                case "sendshortcut": SendShortcut(arg); break;
                 default: Log("ação desconhecida: " + action); break;
             }
+        }
+
+        // sendshortcut, MODS, TECLA[, campo:regex]: envia o atalho para a janela ativa.
+        // Com filtro, envia só se a janela ativa casar com ele (campos: class, title, exe).
+        static void SendShortcut(string arg)
+        {
+            string[] p = arg.Split(new char[] { ',' }, 3);
+            if (p.Length < 2) throw new Exception("sendshortcut: use MODS, TECLA[, campo:regex]");
+            int mods = ParseMods(p[0]);
+            uint key = ParseKey(p[1].Trim());
+            if (key == 0 || key > 0xFF) throw new Exception("sendshortcut: tecla desconhecida: " + p[1]);
+            if (p.Length > 2 && p[2].Trim() != "")
+            {
+                string cond = p[2].Trim();
+                int c = cond.IndexOf(':');
+                if (c < 0) throw new Exception("sendshortcut: filtro sem campo: " + cond);
+                Rule r = new Rule();
+                r.Field = cond.Substring(0, c).Trim().ToLowerInvariant();
+                r.Re = new Regex(cond.Substring(c + 1).Trim(), RegexOptions.IgnoreCase);
+                IntPtr fg = N.GetForegroundWindow();
+                uint pid; N.GetWindowThreadProcessId(fg, out pid);
+                if (!MatchRule(r, ClassOf(fg), TitleOf(fg), ExeOf(pid))) return;
+            }
+            // Solta a tecla Win física para o app receber só o atalho. Depois pressiona Win de novo,
+            // para outra bind funcionar enquanto Win continua presa, e mascara para não abrir o menu Iniciar.
+            bool lwin = Down(0x5B), rwin = Down(0x5C);
+            List<INPUT> l = new List<INPUT>();
+            if (lwin) l.Add(KeyInput(0x5B, false));
+            if (rwin) l.Add(KeyInput(0x5C, false));
+            ushort[] mvk = { 0x11, 0x10, 0x12 };
+            int[] mbit = { MOD_CTRL, MOD_SHIFT, MOD_ALT };
+            for (int i = 0; i < 3; i++) if ((mods & mbit[i]) != 0) l.Add(KeyInput(mvk[i], true));
+            l.Add(KeyInput((ushort)key, true));
+            l.Add(KeyInput((ushort)key, false));
+            for (int i = 2; i >= 0; i--) if ((mods & mbit[i]) != 0) l.Add(KeyInput(mvk[i], false));
+            if (lwin) l.Add(KeyInput(0x5B, true));
+            if (rwin) l.Add(KeyInput(0x5C, true));
+            if (lwin || rwin) { l.Add(KeyInput(0xE8, true)); l.Add(KeyInput(0xE8, false)); }
+            N.SendInput((uint)l.Count, l.ToArray(), Marshal.SizeOf(typeof(INPUT)));
+        }
+
+        static INPUT KeyInput(ushort vk, bool down)
+        {
+            INPUT i = new INPUT();
+            i.type = 1;
+            i.u.ki.wVk = vk;
+            bool ext = (vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E || vk == 0x5B || vk == 0x5C;
+            i.u.ki.dwFlags = (ext ? 1u : 0u) | (down ? 0u : 2u);
+            return i;
         }
 
         // ---------------------------------------------------------------- launcher

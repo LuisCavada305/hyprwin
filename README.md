@@ -33,6 +33,8 @@ Inclui também o rice do terminal: prompt em duas linhas, fetch no estilo fastfe
 | `Win+F` | Fullscreen |
 | `Win+J` | Toggle split |
 | `Win+E` | Explorer |
+| `Win+W` | Edge |
+| `Win+T` | Mostra/esconde a barra de abas do Windows Terminal (`sendshortcut` → `Ctrl+Shift+F12`) |
 | `Win+M` | Sai do HyprWin (mostra todas as janelas) |
 | `Win+scroll` | Workspace seguinte / anterior no monitor |
 | `Win+arrastar` | Esquerdo move, direito redimensiona |
@@ -52,13 +54,14 @@ Outros comandos:
 .\hyprwin.ps1 -Restore     # mostra janelas que ficaram ocultas após uma falha
 ```
 
-Edite `hyprwin.conf` e salve para recarregar. Os nomes dos monitores (`DISPLAY1`, `DISPLAY2`…) aparecem em `hyprwin.log`.
+Edite `hyprwin.conf` e salve para recarregar.
+`sendshortcut, MODS, TECLA[, campo:regex]` envia um atalho para a janela ativa (com filtro opcional por `class`, `title` ou `exe`). Os nomes dos monitores (`DISPLAY1`, `DISPLAY2`…) aparecem em `hyprwin.log`.
 
 ### Rice do terminal (opcional)
 
 - `powershell/Microsoft.PowerShell_profile.ps1` → copie para o caminho de `$PROFILE`.
   Prompt em duas linhas (caminho curto em cima, `❯` embaixo), cores do PSReadLine, `ll` com ícones e `fetch`.
-- `terminal/settings.json` → referência para o Windows Terminal (modo foco sem barra, Rosé Pine, `-NoLogo`).
+- `terminal/settings.json` → referência para o Windows Terminal (modo foco sem barra, Rosé Pine, `-NoLogo`, `Ctrl+Shift+F12` alterna o modo foco).
 - Requer a fonte [JetBrainsMono Nerd Font](https://www.nerdfonts.com/).
 
 ## Limitações
